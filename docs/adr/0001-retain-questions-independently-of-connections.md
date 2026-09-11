@@ -1,0 +1,3 @@
+# Retain accepted questions independently of browser connections
+
+Accepted shopper questions and conversation history must survive processing failures and browser reconnects, so question processing has a persisted lifecycle independent of the original connection. A stable submission identifier deduplicates browser retries; internal processing may repeat, but only one completed answer becomes authoritative. This accepts the complexity of durable processing and recovery over a connection-bound chat flow, while bounding the promise with cancellation and a two-minute request deadline rather than guaranteeing eventual answers.
