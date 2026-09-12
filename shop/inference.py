@@ -51,7 +51,8 @@ class VLLMProvider:
         payload = {"model": self.model, "messages": [
             {"role": "system", "content": "Answer only from the supplied catalog evidence. Return JSON with text and products (name,url). If evidence is absent, explain the limitation and return no products."},
             {"role": "user", "content": f"Question: {question}\nCatalog evidence: {evidence}"},
-        ], "temperature": 0, "max_tokens": 512, "stream": False}
+        ], "temperature": 0, "max_tokens": 512, "stream": False,
+                   "chat_template_kwargs": {"enable_thinking": False}}
         try:
             data: Any = json.dumps(payload).encode()
             req = request.Request(self.base_url + "/v1/chat/completions", data=data,
@@ -63,7 +64,11 @@ class VLLMProvider:
                 content = content.split("```", 2)[1]
                 content = content.removeprefix("json").strip()
             parsed: Any = json.loads(content)
-            return ProductAnswer.model_validate(parsed)
+            answer = ProductAnswer.model_validate(parsed)
+            if product is not None:
+                answer = ProductAnswer(text=answer.text, products=[ProductLink(
+                    name=product.name, url=f"/products/{product.id}")])
+            return answer
         except TimeoutError as error:
             raise TransientInferenceError("Inference deadline reached") from error
         except Exception as error:

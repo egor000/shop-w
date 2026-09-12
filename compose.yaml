@@ -13,6 +13,8 @@ services:
     profiles: [vllm]
     ports:
       - "127.0.0.1:8000:8000"
+    environment:
+      HF_HUB_DISABLE_XET: "1"
     command:
       - --model
       - Qwen/Qwen3-1.7B
@@ -33,7 +35,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
       interval: 10s
       timeout: 5s
       retries: 60
@@ -61,7 +63,7 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:6333/healthz"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 2s
       timeout: 3s
       retries: 30
