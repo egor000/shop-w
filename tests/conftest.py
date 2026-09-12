@@ -45,7 +45,7 @@ class Deployment:
         self.env = {**os.environ, "DATABASE_URL": os.environ.get(
             "TEST_DATABASE_URL",
             "postgresql://shop:shop-test@127.0.0.1:55439/shop_test",
-        ), "DETERMINISTIC_DELAY_SECONDS": "1"}
+        ), "DETERMINISTIC_DELAY_SECONDS": "1", "LEGACY_DEMO_FALLBACK": "true"}
 
     @contextmanager
     def api_process(self, application="shop.api:app"):

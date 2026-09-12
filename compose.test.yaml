@@ -1,5 +1,14 @@
 name: shop-assistant-tests
 services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    ports:
+      - "127.0.0.1:6333:6333"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:6333/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
   db:
     image: postgres:16@sha256:bdbc203f612e315fdd33001f98ba0c300bb3b58a5d136fbb08dd377e8057e2b1
     environment:

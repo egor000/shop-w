@@ -88,3 +88,7 @@ class Product(BaseModel):
     width_cm: float
     height_cm: float
     weight_kg: float
+    brand: str = ""
+    attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    department_id: str = ""
+    category_id: str = ""

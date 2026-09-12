@@ -8,7 +8,8 @@ from uuid import UUID, uuid4
 from typing import Literal
 
 from shop.inference import DeterministicProvider, InferenceProvider, TransientInferenceError
-from shop.store import get_product
+from shop.store import catalog_ready, get_product, product_search_release
+from shop.vector_store import search as vector_search
 from shop import work_queue
 
 logger = logging.getLogger("shop.worker")
@@ -34,7 +35,20 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
     heartbeat.start()
     failure: Literal["transient_inference", "permanent_inference"] | None = None
     try:
-        answer = provider.answer(claim.text, get_product("trail-cup"),
+        # The legacy fixture product is opt-in for pre-catalog tests only. A
+        # deployed catalog must never fabricate a product while it is absent
+        # or not ready.
+        product_id: str | None = (
+            "trail-cup" if os.environ.get("LEGACY_DEMO_FALLBACK") == "true" else None
+        )
+        if catalog_ready():
+            release = product_search_release()
+            matches = vector_search(claim.text, release, limit=1) if release else []
+            if matches:
+                product_id = matches[0]
+            else:
+                product_id = None
+        answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
                                  timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
     except TransientInferenceError:
         answer = None

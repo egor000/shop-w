@@ -2,6 +2,8 @@
 
 The first three implementation slices ([#1](https://github.com/egor000/shop-w/issues/1), [#2](https://github.com/egor000/shop-w/issues/2), [#3](https://github.com/egor000/shop-w/issues/3)) let an anonymous shopper ask about one fictional product, recover its saved answer across application crashes, cancel pending questions, and retry failed or expired questions. Python/FastAPI serves the browser and public API; separate Python workers process PostgreSQL work records. The deterministic provider requires no GPU or model downloads.
 
+Ticket #4 adds the ten-product frozen catalog, Qdrant retrieval, and an independent ingestion job. Catalog facts remain authoritative in PostgreSQL; Qdrant stores only release-tagged vectors and product IDs.
+
 ## Run locally
 
 ```sh
@@ -25,6 +27,8 @@ Ordinary `down` preserves stored conversations. `down -v` deletes them. The migr
 - `GET /api/conversations/{id}`: recover all accepted questions, original acceptance/deadline timestamps, statuses and complete answers. Returns `404` for another session's conversation.
 - `POST /api/conversations/{id}/questions/{question_id}/cancel`: cancel pending work. Repeated cancellation returns the saved terminal outcome. If the deadline has elapsed, expiry wins; completed results remain unchanged.
 - `GET /products/trail-cup`: product facts and local product page.
+- `GET /api/catalog/readiness`: current ready release, product count, embedding identity, and preprocessing identity.
+- `GET /api/products/search?q=...&category=...&department=...`: read-only Qdrant search with authoritative product facts and local links. Department filters include both leaf categories.
 - `GET /api/operations/questions/{id}`: read-only attempt/lease/recovery metadata, without question or answer text. This v1 operational endpoint has no administrator authentication.
 - `GET /health`: database reachability; `/docs`: generated API documentation.
 
@@ -35,6 +39,8 @@ Each acceptance transaction locks its conversation. Worker claims use PostgreSQL
 All claims, including recovery after process death, consume the persisted maximum of three attempts. `TransientInferenceError` schedules a persisted retry with exponential jitter (0.5–1 seconds after the first failure, 1–2 seconds after the second), bounded by the original deadline. Other provider errors fail the question immediately. The provider receives the remaining inference timeout. Attempt history, sanitized failure codes and recovery counts survive restarts; logs contain identifiers and statuses without shopper questions or answers. Stop old API/worker processes before applying schema upgrades; Compose recreates them and runs migrations before starting the new versions.
 
 The independent `maintenance` service expires due questions even with every inference worker stopped. Run `python -m shop.maintenance --once` for a scheduled-job invocation; without `--once` it checks once per second. Expiry, cancellation and completion serialize through durable work ownership and preserve the first valid terminal result. Terminal timestamps are available in shopper and operational state. A browser disconnect does not cancel work. “Try this question again” creates a fresh submission ID and deadline for failed/expired questions; network retry keeps the original ID. Cancelled and expired records remain readable until a future retention job removes them.
+
+The `ingest` service is a repeatable job. It upserts the frozen fixture into PostgreSQL, creates or updates the Qdrant `catalog_products` collection in bounded point batches, and records each batch checkpoint before marking the release ready only after filtered vector completeness validation. A failed or missing Qdrant write leaves the release loading and `/api/products/search` returns a clear `503`; no product facts are fabricated. The worker uses the top Qdrant match for a ready catalog question, then loads that product’s authoritative PostgreSQL facts before saving the answer. A ready catalog with no match produces a limitation answer with no product link. Stable department/category IDs and typed string attributes are stored with every product. The embedding seam records `BAAI/bge-small-en-v1.5` revision `73e8f7f` and `catalog-text-v1`; this laptop slice uses a deterministic CPU substitute for repeatable integration tests, while `requirements-real-embeddings.txt` enables the pinned CPU BGE smoke environment.
 
 ## Verify
 

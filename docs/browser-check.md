@@ -48,3 +48,9 @@ The browser now displays each question's persisted outcome, offers “Cancel que
 Cancellation followed by reload was verified in Chrome. The review caught the unresolved-delivery edge case above; both submission handlers now guard the existing outbox, and explicit retry disables immediately on submission.
 
 The full browser check passed: maintenance expired the question with inference stopped; the fault proxy withheld the explicit retry's acknowledgement; “Try this question again” was disabled while “Reconnect and retry” stayed visible. Reconnect recovered exactly one additional completed question, beside the unchanged expired original. Ticket #3 validation finished with 27 passing tests, strict mypy passing for nine application modules, and zero outstanding findings on either review axis.
+
+## Catalog ingestion and retrieval — ticket #4
+
+The independent `ingest` job was run against real Compose PostgreSQL and Qdrant. Readiness reported the frozen `demo-2026-09-12` release with ten products and the recorded embedding/preprocessing identities. A headphone search returned Aurora Headphones and its `/products/aurora-headphones` link; the detail page displayed the authoritative brand, price, rating, dimensions and weight. Department search returned both leaf categories. Deleting the Qdrant collection made search return `503`, with no fabricated facts.
+
+With the catalog ready, “Which headphones have noise reduction?” produced a saved answer linking to Aurora Headphones. Four catalog integration tests use real PostgreSQL and Qdrant, and the complete suite has 31 passing tests.

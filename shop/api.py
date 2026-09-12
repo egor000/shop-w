@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from shop import store, work_queue
 from shop.models import Conversation, OperationalQuestion, Question, Submission
+from shop.vector_store import search as vector_search
 
 app = FastAPI(title="Shopping assistant")
 logger = logging.getLogger("uvicorn.error")
@@ -100,10 +101,33 @@ def product(product_id: str) -> str:
     facts = store.get_product(product_id)
     return ("<!doctype html><html lang='en'><meta charset='utf-8'><title>" + html.escape(facts.name) + "</title>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'><main>"
-            f"<h1>{html.escape(facts.name)}</h1><p>{html.escape(facts.description)}</p>"
+            f"<h1>{html.escape(facts.name)}</h1><p>Brand: {html.escape(facts.brand)}</p><p>{html.escape(facts.description)}</p>"
             f"<p>{html.escape(facts.department)} / {html.escape(facts.category)}</p>"
             f"<p>USD {facts.price_cents / 100:.2f} · {facts.stock} in stock</p>"
             f"<p>Rating: {facts.rating_average}/5 ({facts.rating_count} ratings)</p>"
             f"<p>Dimensions: {facts.length_cm:g} × {facts.width_cm:g} × {facts.height_cm:g} cm</p>"
             f"<p>Product weight: {facts.weight_kg:g} kg (excluding packaging)</p>"
             "<a href='/'>Back to assistant</a></main></html>")
+
+
+@app.get("/api/products/search")
+def search_products(q: str, category: str | None = None, department: str | None = None) -> dict[str, object]:
+    if not store.catalog_ready():
+        raise HTTPException(503, "Catalog is not ready")
+    try:
+        release = store.product_search_release()
+        ids = vector_search(q, release, score_threshold=0.0 if (category or department) else .4) if release else []
+    except Exception:
+        raise HTTPException(503, "Product search is temporarily unavailable") from None
+    products = store.products_by_ids(ids)
+    if category:
+        products = [product for product in products if product.category == category]
+    if department:
+        products = [product for product in products if product.department == department]
+    catalog_info = store.catalog_status()
+    return {"products": [product.model_dump() | {"url": f"/products/{product.id}", "available": product.stock > 0} for product in products], "catalog_release": catalog_info["release"] if catalog_info else None}
+
+
+@app.get("/api/catalog/readiness")
+def catalog_readiness() -> dict[str, object]:
+    return store.catalog_status() or {"status": "unready"}

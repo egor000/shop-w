@@ -83,6 +83,37 @@ def get_product(product_id: str) -> Product:
         return Product.model_validate(row["facts"])
 
 
+def catalog_ready() -> bool:
+    with connect() as db:
+        return db.execute("SELECT 1 FROM catalog_releases WHERE status = 'ready' LIMIT 1").fetchone() is not None
+
+
+def catalog_status() -> dict[str, object] | None:
+    with connect() as db:
+        row = db.execute("""
+            SELECT id, status, product_count, embedding_model, preprocessing
+            FROM catalog_releases WHERE status = 'ready' ORDER BY ready_at DESC LIMIT 1
+        """).fetchone()
+        if row is None:
+            return None
+        return {"status": row["status"], "release": row["id"], "product_count": row["product_count"],
+                "embedding_model": row["embedding_model"], "preprocessing": row["preprocessing"]}
+
+
+def products_by_ids(product_ids: list[str]) -> list[Product]:
+    if not product_ids:
+        return []
+    with connect() as db:
+        rows = db.execute("SELECT facts FROM products WHERE id = ANY(%s)", (product_ids,)).fetchall()
+        by_id = {row["facts"]["id"]: Product.model_validate(row["facts"]) for row in rows}
+        return [by_id[product_id] for product_id in product_ids if product_id in by_id]
+
+
+def product_search_release() -> str | None:
+    status = catalog_status()
+    return str(status["release"]) if status else None
+
+
 def get_operations(question_id: UUID) -> OperationalQuestion:
     with connect() as db:
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")

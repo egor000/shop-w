@@ -23,6 +23,31 @@ services:
       retries: 30
     restart: unless-stopped
 
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:6333/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  ingest:
+    <<: *app
+    build: .
+    command: ["python", "-m", "shop.ingest"]
+    environment:
+      <<: *environment
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      db: {condition: service_healthy}
+      qdrant: {condition: service_healthy}
+
   migrate:
     <<: *app
     build: .
@@ -38,6 +63,11 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      ingest:
+        condition: service_completed_successfully
+    environment:
+      <<: *environment
+      QDRANT_URL: http://qdrant:6333
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
       interval: 10s
@@ -51,8 +81,11 @@ services:
     environment:
       <<: *environment
       DETERMINISTIC_DELAY_SECONDS: "2"
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      ingest:
         condition: service_completed_successfully
     restart: unless-stopped
 
@@ -66,3 +99,4 @@ services:
 
 volumes:
   postgres-data:
+  qdrant-data:
