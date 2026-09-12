@@ -9,8 +9,26 @@ from contextlib import contextmanager
 import httpx
 import pytest
 import psycopg
+import psutil
 from psycopg import sql
 from uuid import uuid4
+
+
+def process_tree(child):
+    try:
+        parent = psutil.Process(child.pid)
+        return [*parent.children(recursive=True), parent]
+    except psutil.NoSuchProcess:
+        return []
+
+
+def kill_process_tree(child):
+    for member in process_tree(child):
+        try:
+            member.kill()
+        except psutil.NoSuchProcess:
+            pass
+    child.wait(timeout=10)
 
 
 @contextmanager
@@ -19,8 +37,7 @@ def process(*args, env):
     try:
         yield child
     finally:
-        child.terminate()
-        child.wait(timeout=10)
+        kill_process_tree(child)
 
 
 class Deployment:
@@ -31,11 +48,11 @@ class Deployment:
         ), "DETERMINISTIC_DELAY_SECONDS": "1"}
 
     @contextmanager
-    def api(self):
+    def api_process(self, application="shop.api:app"):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
-        with process("-m", "uvicorn", "shop.api:app", "--port", str(port),
+        with process("-m", "uvicorn", application, "--port", str(port),
                      "--no-access-log", env=self.env) as child:
             with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=5) as client:
                 for _ in range(100):
@@ -48,16 +65,24 @@ class Deployment:
                     time.sleep(0.1)
                 else:
                     pytest.fail("API did not become ready")
-                yield client
+                yield client, child
 
-    def worker(self):
-        return process("-m", "shop.worker", env=self.env)
+    @contextmanager
+    def api(self):
+        with self.api_process() as (client, _):
+            yield client
+
+    def worker(self, **settings):
+        return process("-m", "shop.worker", env={**self.env, **settings})
+
+    def controlled_worker(self, **settings):
+        return process("-m", "tests.controlled_worker", env={**self.env, **settings})
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def deployment():
     deployment = Deployment()
-    # Isolate runs without clearing any pre-existing application data.
+    # Isolate every scenario, including queued work deliberately left unfinished.
     schema = "test_" + uuid4().hex
     with psycopg.connect(deployment.env["DATABASE_URL"]) as db:
         db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))

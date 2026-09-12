@@ -11,6 +11,11 @@ def main() -> None:
         if db.execute("SELECT 1 FROM schema_versions WHERE version = 1").fetchone() is None:
             db.execute(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
             db.execute("INSERT INTO schema_versions VALUES (1)")
+        for path in sorted(Path(__file__).with_name("migrations").glob("*.sql")):
+            version = int(path.name.split("_")[0])
+            if db.execute("SELECT 1 FROM schema_versions WHERE version = %s", (version,)).fetchone() is None:
+                db.execute(path.read_text(encoding="utf-8"))
+                db.execute("INSERT INTO schema_versions VALUES (%s)", (version,))
 
 
 if __name__ == "__main__":

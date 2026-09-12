@@ -69,6 +69,7 @@ function render(questions) {
   const pending = latest && ['waiting', 'processing'].includes(latest.status);
   statusView.textContent = pending ? (latest.status === 'waiting' ? 'Waiting for an answer…' : 'Preparing your answer…')
     : latest?.status === 'completed' ? 'Answer saved.'
+    : latest?.status === 'expired' ? 'The question expired before an answer was ready. You can ask again.'
     : latest?.status === 'failed' ? 'The answer could not be prepared. You can ask again.' : 'Ready for your question.';
   setEnabled(!pending && !localStorage.getItem(outboxKey()));
 }

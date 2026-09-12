@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import psycopg
 from psycopg.rows import dict_row
 
-from shop.models import Conversation, Product, Question, Submission
+from shop.models import Conversation, OperationalQuestion, Product, Question, Submission
 
 
 class NotFound(Exception):
@@ -81,3 +81,21 @@ def get_product(product_id: str) -> Product:
         if row is None:
             raise NotFound
         return Product.model_validate(row["facts"])
+
+
+def get_operations(question_id: UUID) -> OperationalQuestion:
+    with connect() as db:
+        db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        row = db.execute("""
+            SELECT q.id, q.status, q.accepted_at, q.deadline, q.attempt_count,
+                   q.recovery_count, q.last_error,
+                   CASE WHEN w.attempt_id IS NULL THEN w.available_at END AS next_attempt_at
+            FROM questions q LEFT JOIN work w ON w.question_id = q.id WHERE q.id = %s
+        """, (question_id,)).fetchone()
+        if row is None:
+            raise NotFound
+        row["attempts"] = db.execute("""
+            SELECT id, number, worker_id, started_at, lease_expires_at, finished_at, outcome
+            FROM attempts WHERE question_id = %s ORDER BY number
+        """, (question_id,)).fetchall()
+        return OperationalQuestion.model_validate(row)

@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from shop import store
-from shop.models import Conversation, Question, Submission
+from shop.models import Conversation, OperationalQuestion, Question, Submission
 
 app = FastAPI(title="Shopping assistant")
 logger = logging.getLogger("uvicorn.error")
@@ -75,6 +75,11 @@ def create_conversation(request: Request) -> dict[str, UUID]:
 @app.get("/api/conversations/{conversation_id}")
 def conversation(conversation_id: UUID, request: Request) -> Conversation:
     return store.get_conversation(conversation_id, token(request))
+
+
+@app.get("/api/operations/questions/{question_id}")
+def operations(question_id: UUID) -> OperationalQuestion:
+    return store.get_operations(question_id)
 
 
 @app.post("/api/conversations/{conversation_id}/questions", status_code=202)

@@ -21,3 +21,17 @@ The API-stop/restart check restored history and enabled another submission. A re
 To reproduce that regression check, run `python tests/disrupted_proxy.py` and open `http://localhost:8092`. The fixture delays conversation GET responses for six seconds and replaces the first forwarded submission's acknowledgement with `503`. Submit while a poll is in flight. After the delayed poll returns, the retry control must remain visible. Retry must recover exactly one saved question and answer. The fixture never changes persistence or inference behavior.
 
 This fault check passed: the retry control remained visible after the delayed poll, and retry recovered exactly one completed question and answer. The complete API suite passed (13 tests), along with strict mypy checks of all seven Python application modules. Both review axes finished with zero outstanding findings.
+
+## Worker crash recovery — ticket #2
+
+Verified in Chrome on 2026-09-12 with the upgraded Compose deployment and existing saved conversation:
+
+1. Stop the ordinary worker: `docker compose stop worker`.
+2. Start a delayed worker: `docker compose run -d --no-deps --name shop-assistant-recovery-demo -e DETERMINISTIC_DELAY_SECONDS=30 -e WORKER_LEASE_SECONDS=2 worker`.
+3. Submit “Will my Trail Cup question survive a worker crash?” and observe “Preparing your answer…”.
+4. Kill that worker with `docker kill shop-assistant-recovery-demo`, then start its replacement using `docker compose start worker`.
+5. The open browser changed to “Answer saved.” and displayed one complete answer to the original question, alongside unchanged earlier conversation history. Worker logs showed attempt number 2 with a new attempt ID. The recovered answer included the product link and recorded facts.
+
+The API suite separately verifies expired ownership before reassignment, rejection of a stale answer after a replacement completes, persisted three-attempt budgets across crashes, and the actual two-minute deadline. No database state is edited to force those outcomes.
+
+Ticket #2 validation: 22 tests passed in the complete suite, strict mypy passed for eight application modules, and both review axes have no outstanding findings. Each test uses its own PostgreSQL schema so deliberately unfinished work cannot leak into another scenario.

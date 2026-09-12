@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import pytest
 
-from conftest import wait_for_question
+from tests.conftest import wait_for_question
 
 
 def test_accepted_question_survives_api_restart_and_worker_saves_answer(deployment):
