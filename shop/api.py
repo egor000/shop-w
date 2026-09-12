@@ -5,7 +5,7 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -111,12 +111,18 @@ def product(product_id: str) -> str:
 
 
 @app.get("/api/products/search")
-def search_products(q: str, category: str | None = None, department: str | None = None) -> dict[str, object]:
+def search_products(q: str, category: str | None = None, department: str | None = None,
+                    min_price_cents: int | None = Query(None, ge=0), max_price_cents: int | None = Query(None, ge=0),
+                    in_stock: bool | None = None, min_rating: float | None = Query(None, ge=0, le=5),
+                    max_length_cm: float | None = Query(None, ge=0), max_width_cm: float | None = Query(None, ge=0),
+                    max_height_cm: float | None = Query(None, ge=0), max_weight_kg: float | None = Query(None, ge=0),
+                    attribute: list[str] | None = None) -> dict[str, object]:
     if not store.catalog_ready():
         raise HTTPException(503, "Catalog is not ready")
     try:
         release = store.product_search_release()
-        ids = vector_search(q, release, score_threshold=0.0 if (category or department) else .4) if release else []
+        constrained = any(value is not None for value in (category, department, min_price_cents, max_price_cents, in_stock, min_rating, max_length_cm, max_width_cm, max_height_cm, max_weight_kg, attribute))
+        ids = vector_search(q, release, limit=100, score_threshold=0.0 if constrained else .4) if release else []
     except Exception:
         raise HTTPException(503, "Product search is temporarily unavailable") from None
     products = store.products_by_ids(ids)
@@ -124,8 +130,24 @@ def search_products(q: str, category: str | None = None, department: str | None 
         products = [product for product in products if product.category == category]
     if department:
         products = [product for product in products if product.department == department]
+    products = [product for product in products if (min_price_cents is None or product.price_cents >= min_price_cents)
+                and (max_price_cents is None or product.price_cents <= max_price_cents)
+                and (in_stock is None or (product.stock > 0) == in_stock)
+                and (min_rating is None or (product.rating_average is not None and product.rating_count > 0 and product.rating_average >= min_rating))
+                and (max_length_cm is None or product.length_cm <= max_length_cm)
+                and (max_width_cm is None or product.width_cm <= max_width_cm)
+                and (max_height_cm is None or product.height_cm <= max_height_cm)
+                and (max_weight_kg is None or product.weight_kg <= max_weight_kg)]
+    for expression in attribute or []:
+        if "=" not in expression:
+            raise HTTPException(422, "attribute must be key=value")
+        key, value = expression.split("=", 1)
+        products = [product for product in products if str(product.attributes.get(key)) == value]
     catalog_info = store.catalog_status()
-    return {"products": [product.model_dump() | {"url": f"/products/{product.id}", "available": product.stock > 0} for product in products], "catalog_release": catalog_info["release"] if catalog_info else None}
+    return {"products": [product.model_dump() | {"url": f"/products/{product.id}", "available": product.stock > 0,
+                                                   "measurement_basis": "product, excluding packaging"} for product in products],
+            "catalog_release": catalog_info["release"] if catalog_info else None,
+            "retrieval": {"candidate_count": len(ids), "result_count": len(products), "constraints_applied": constrained}}
 
 
 @app.get("/api/catalog/readiness")

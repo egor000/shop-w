@@ -55,6 +55,22 @@ def test_department_filter_includes_its_leaf_categories(catalog_deployment):
         assert {product["category"] for product in result.json()["products"]} == {"Electric kettles", "Table lamps"}
 
 
+def test_structured_constraints_filter_authoritative_product_facts(catalog_deployment):
+    deployment, _, _ = catalog_deployment
+    with deployment.api_process() as (api, _):
+        result = api.get("/api/products/search", params={
+            "q": "wireless headphones", "category": "Headphones", "max_price_cents": 9000, "min_rating": 4.0,
+            "max_weight_kg": .5, "in_stock": "true", "attribute": "connection=bluetooth",
+        })
+        assert result.status_code == 200
+        products = result.json()["products"]
+        assert [product["id"] for product in products] == ["aurora-headphones"]
+        assert products[0]["measurement_basis"] == "product, excluding packaging"
+        rejected = api.get("/api/products/search", params={"q": "wireless headphones", "max_price_cents": 1000})
+        assert rejected.status_code == 200
+        assert rejected.json()["products"] == []
+
+
 def test_unready_catalog_is_explicit_and_search_does_not_fabricate(catalog_deployment):
     deployment, qdrant, _ = catalog_deployment
     qdrant.delete_collection(COLLECTION)

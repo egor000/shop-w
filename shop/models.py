@@ -82,7 +82,7 @@ class Product(BaseModel):
     category: str
     price_cents: int
     stock: int
-    rating_average: float
+    rating_average: float | None
     rating_count: int
     length_cm: float
     width_cm: float
