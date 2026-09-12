@@ -25,7 +25,8 @@ async function api(path, body) {
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) {
-    const message = response.status === 404 ? 'This conversation is not available in this browser.'
+    const message = response.status === 410 ? 'This conversation history expired after 30 days. Start a new conversation.'
+      : response.status === 404 ? 'This conversation is not available in this browser.'
       : response.status === 409 ? 'This question conflicts with an existing submission or a question already in progress.'
       : response.status === 422 ? 'Enter a question of 1–4,000 characters.'
       : 'Connection unavailable. Your submission is kept in this browser for retry.';

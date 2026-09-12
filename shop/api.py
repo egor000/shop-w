@@ -12,12 +12,15 @@ from fastapi.staticfiles import StaticFiles
 from shop import store, work_queue
 from shop.models import Conversation, OperationalQuestion, Question, Submission
 from shop.vector_store import search as vector_search
+from shop.observability import begin_request, finish_request, prometheus
+from shop.tracing import configure, span
 
 app = FastAPI(title="Shopping assistant")
 logger = logging.getLogger("uvicorn.error")
 COOKIE = "shop_session"
 STATIC = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+configure()
 
 
 @app.get("/")
@@ -34,9 +37,16 @@ def token(request: Request) -> str:
 
 @app.middleware("http")
 async def request_metadata(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    request_id = str(uuid4())
-    response = await call_next(request)
+    request_id, started, token = begin_request()
+    try:
+        with span("http.request", method=request.method, route=request.url.path):
+            response = await call_next(request)
+    except Exception:
+        finish_request(request.method, 500, started, token)
+        raise
+    finish_request(request.method, response.status_code, started, token)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Trace-ID"] = request_id
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     logger.info("request_id=%s method=%s status=%s", request_id, request.method, response.status_code)
@@ -48,11 +58,33 @@ async def not_found(request: Request, error: store.NotFound) -> JSONResponse:
     return JSONResponse({"detail": "Not found"}, status_code=404)
 
 
+@app.exception_handler(store.ExpiredHistory)
+async def expired_history(request: Request, error: store.ExpiredHistory) -> JSONResponse:
+    return JSONResponse({"detail": "This conversation's history expired after 30 days. Start a new conversation."}, status_code=410)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     with store.connect() as db:
         db.execute("SELECT 1")
     return {"status": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(prometheus(), media_type="text/plain; version=0.0.4")
+
+
+@app.get("/operations", response_class=HTMLResponse, include_in_schema=False)
+def operations_page() -> str:
+    return """<!doctype html><html lang='en'><meta charset='utf-8'>
+    <title>Shopping assistant operations</title><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <main><h1>Operations</h1><p>Read-only operational links.</p>
+    <ul><li><a href='/api/operations/summary'>Request summary</a></li>
+    <li><a href='/api/catalog/operations'>Ingestion status</a></li>
+    <li><a href='/api/operations/inference'>Inference control</a></li>
+    <li><a href='/metrics'>Prometheus metrics</a></li>
+    <li><a href='http://localhost:3000'>Grafana dashboards</a></li></ul></main></html>"""
 
 
 @app.exception_handler(store.Conflict)
@@ -168,3 +200,8 @@ def catalog_operations() -> dict[str, object]:
 @app.get("/api/operations/inference")
 def inference_operations() -> dict[str, object]:
     return store.inference_status()
+
+
+@app.get("/api/operations/summary")
+def operations_summary() -> dict[str, object]:
+    return {key: value for key, value in store.telemetry_snapshot().items()}

@@ -15,6 +15,10 @@ class NotFound(Exception):
     pass
 
 
+class ExpiredHistory(Exception):
+    pass
+
+
 class Conflict(Exception):
     pass
 
@@ -51,8 +55,11 @@ def create_conversation(token: str) -> UUID:
 
 def get_conversation(conversation_id: UUID, token: str) -> Conversation:
     with connect() as db:
-        if not db.execute("SELECT 1 FROM conversations WHERE id = %s AND session_hash = %s", (conversation_id, session_hash(token))).fetchone():
+        row = db.execute("SELECT expired_at FROM conversations WHERE id = %s AND session_hash = %s", (conversation_id, session_hash(token))).fetchone()
+        if row is None:
             raise NotFound
+        if row["expired_at"] is not None:
+            raise ExpiredHistory
         rows = db.execute("SELECT * FROM questions WHERE conversation_id = %s ORDER BY accepted_at, id", (conversation_id,)).fetchall()
         return Conversation(id=conversation_id, questions=[Question.model_validate(row) for row in rows])
 
@@ -141,6 +148,34 @@ def inference_status() -> dict[str, object]:
         return {"breaker_state": row["breaker_state"], "consecutive_failures": row["consecutive_failures"],
                 "opened_at": row["opened_at"], "probe_active": row["probe_attempt_id"] is not None,
                 "active_slots": active["count"], "slot_limit": 2, "pending_depth": depth["count"]}
+
+
+def telemetry_snapshot() -> dict[str, int]:
+    """Return aggregate signals safe to expose to operators and scrapers."""
+    with connect() as db:
+        questions = db.execute("""
+            SELECT count(*) FILTER (WHERE status IN ('waiting', 'processing')) AS queue_depth,
+                   count(*) FILTER (WHERE status = 'completed') AS completed,
+                   count(*) FILTER (WHERE status IN ('failed', 'expired', 'cancelled')) AS terminal_failures
+            FROM questions
+        """).fetchone()
+        attempts = db.execute("""
+            SELECT count(*) FILTER (WHERE outcome = 'abandoned') AS recovered_attempts,
+                   count(*) FILTER (WHERE outcome = 'transient_failure') AS transient_failures
+            FROM attempts
+        """).fetchone()
+        catalog = db.execute("""
+            SELECT coalesce(sum(p.batch_end - p.batch_start), 0) AS ingestion_items
+            FROM catalog_progress p JOIN catalog_releases r ON r.id = p.release_id
+            WHERE r.id = (SELECT id FROM catalog_releases ORDER BY started_at DESC, id DESC LIMIT 1)
+        """).fetchone()
+        assert questions is not None and attempts is not None and catalog is not None
+        return {"queue_depth": int(questions["queue_depth"]),
+                "completed_answers": int(questions["completed"]),
+                "terminal_failures": int(questions["terminal_failures"]),
+                "recovered_attempts": int(attempts["recovered_attempts"]),
+                "transient_failures": int(attempts["transient_failures"]),
+                "ingestion_items": int(catalog["ingestion_items"])}
 
 
 def products_by_ids(product_ids: list[str]) -> list[Product]:

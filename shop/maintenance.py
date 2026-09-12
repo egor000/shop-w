@@ -4,6 +4,7 @@ import logging
 import time
 
 from shop.work_queue import expire
+from shop.retention import run_once as run_retention
 
 
 def main() -> None:
@@ -15,6 +16,10 @@ def main() -> None:
         count = expire()
         if count:
             logging.getLogger("shop.maintenance").info("expired_count=%s", count)
+        try:
+            run_retention()
+        except Exception:
+            logging.getLogger("shop.maintenance").exception("retention_failed")
         if count == 100:
             continue
         if args.once:
