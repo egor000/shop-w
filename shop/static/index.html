@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shopping assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">THE DEMO SHOP</p><h1>Your shopping assistant</h1>
+      <p>Ask about the <a href="/products/trail-cup">Trail Cup</a> — our fictional demo product.</p>
+      <p class="muted">This first demo answers with its recorded product facts.</p>
+    </header>
+    <section id="history" aria-label="Conversation"></section>
+    <p id="status" role="status">Connecting…</p>
+    <form id="question-form">
+      <label for="question">Your question</label>
+      <textarea id="question" name="question" maxlength="4000" rows="3" required placeholder="How much does the Trail Cup weigh?" disabled></textarea>
+      <button id="send" type="submit" disabled>Ask</button>
+    </form>
+    <button id="retry" type="button" hidden>Reconnect and retry</button>
+    <p class="muted">Your conversation is saved for this browser. You can refresh while waiting.</p>
+  </main>
+</body>
+</html>

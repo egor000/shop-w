@@ -1,0 +1,5 @@
+*
+!requirements.txt
+!shop/
+!shop/**
+**/__pycache__/

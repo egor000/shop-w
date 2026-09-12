@@ -1,0 +1,60 @@
+name: shop-assistant
+
+x-app: &app
+  image: shop-assistant:local
+  environment: &environment
+    DATABASE_URL: postgresql://shop:shop-local@db:5432/shop
+    COOKIE_SECURE: "false"
+  init: true
+
+services:
+  db:
+    image: postgres:16@sha256:bdbc203f612e315fdd33001f98ba0c300bb3b58a5d136fbb08dd377e8057e2b1
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop-local
+      POSTGRES_DB: shop
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    build: .
+    command: ["python", "-m", "shop.migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8091:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "shop.worker"]
+    environment:
+      <<: *environment
+      DETERMINISTIC_DELAY_SECONDS: "2"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

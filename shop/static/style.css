@@ -1,0 +1,17 @@
+:root { font: 17px/1.6 system-ui, sans-serif; color: #193b35; background: #f4f5ef; }
+body { margin: 0; }
+main { max-width: 720px; margin: 4rem auto; padding: 0 1.5rem; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.5rem); line-height: 1.2; margin: .4rem 0 1rem; }
+.eyebrow { font-size: .75rem; letter-spacing: .16em; font-weight: 700; }
+.muted { color: #596b65; font-size: .88rem; }
+a { color: #17624e; text-underline-offset: .2em; }
+article { background: white; border: 1px solid #d8e0d7; border-radius: 12px; margin: 1.2rem 0; padding: 1.2rem; overflow-wrap: anywhere; }
+article h2 { font-size: .85rem; margin: 0; }
+article p { white-space: pre-wrap; }
+label { display: block; font-weight: 650; margin-bottom: .4rem; }
+textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: .8rem; border: 1px solid #879e92; border-radius: 8px; font: inherit; }
+button { margin-top: .7rem; background: #195b49; color: white; padding: .6rem 1.5rem; border: 0; border-radius: 8px; font: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 3px solid #b4681b; outline-offset: 3px; }
+#status { font-weight: 600; }
+@media (max-width: 500px) { main { margin: 2rem auto; padding: 0 1rem; } }
