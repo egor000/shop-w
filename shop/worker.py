@@ -7,7 +7,7 @@ from threading import Event, Thread
 from uuid import UUID, uuid4
 from typing import Literal
 
-from shop.inference import DeterministicProvider, InferenceProvider, TransientInferenceError
+from shop.inference import DeterministicProvider, InferenceProvider, TransientInferenceError, VLLMProvider
 from shop.store import catalog_ready, get_product, product_search_release
 from shop.vector_store import search as vector_search
 from shop import work_queue
@@ -68,7 +68,10 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
 def main(provider: InferenceProvider | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     if provider is None:
-        provider = DeterministicProvider(float(os.environ.get("DETERMINISTIC_DELAY_SECONDS", "2")))
+        if os.environ.get("INFERENCE_BACKEND") == "vllm":
+            provider = VLLMProvider()
+        else:
+            provider = DeterministicProvider(float(os.environ.get("DETERMINISTIC_DELAY_SECONDS", "2")))
     lease_seconds = float(os.environ.get("WORKER_LEASE_SECONDS", "10"))
     if not math.isfinite(lease_seconds) or lease_seconds <= 0:
         raise ValueError("WORKER_LEASE_SECONDS must be positive and finite")
