@@ -92,12 +92,27 @@ def catalog_status() -> dict[str, object] | None:
     with connect() as db:
         row = db.execute("""
             SELECT id, status, product_count, embedding_model, preprocessing
-            FROM catalog_releases WHERE status = 'ready' ORDER BY ready_at DESC LIMIT 1
+            FROM catalog_releases ORDER BY ready_at DESC NULLS LAST, id DESC LIMIT 1
         """).fetchone()
         if row is None:
             return None
         return {"status": row["status"], "release": row["id"], "product_count": row["product_count"],
                 "embedding_model": row["embedding_model"], "preprocessing": row["preprocessing"]}
+
+
+def catalog_operations() -> dict[str, object] | None:
+    with connect() as db:
+        row = db.execute("""
+            SELECT r.id, r.status, r.product_count, r.embedding_model, r.preprocessing,
+                   r.attempts, r.error, r.started_at, r.completed_at,
+                   count(p.batch_start) AS completed_batches,
+                   coalesce(sum(p.batch_end - p.batch_start), 0) AS completed_items
+            FROM catalog_releases r LEFT JOIN catalog_progress p ON p.release_id = r.id
+            GROUP BY r.id ORDER BY r.started_at DESC, r.id DESC LIMIT 1
+        """).fetchone()
+        if row is None:
+            return None
+        return dict(row)
 
 
 def products_by_ids(product_ids: list[str]) -> list[Product]:

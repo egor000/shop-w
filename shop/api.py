@@ -131,3 +131,8 @@ def search_products(q: str, category: str | None = None, department: str | None 
 @app.get("/api/catalog/readiness")
 def catalog_readiness() -> dict[str, object]:
     return store.catalog_status() or {"status": "unready"}
+
+
+@app.get("/api/catalog/operations")
+def catalog_operations() -> dict[str, object]:
+    return store.catalog_operations() or {"status": "unready", "completed_batches": 0, "completed_items": 0}

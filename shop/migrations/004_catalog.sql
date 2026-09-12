@@ -4,7 +4,11 @@ CREATE TABLE catalog_releases (
     embedding_model text NOT NULL,
     preprocessing text NOT NULL,
     status text NOT NULL CHECK (status IN ('loading', 'ready', 'failed')),
-    ready_at timestamptz
+    ready_at timestamptz,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    completed_at timestamptz,
+    attempts integer NOT NULL DEFAULT 0,
+    error text
 );
 CREATE TABLE catalog_progress (
     release_id text NOT NULL REFERENCES catalog_releases(id),

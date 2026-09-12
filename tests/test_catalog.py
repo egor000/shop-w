@@ -32,6 +32,10 @@ def test_ingestion_publishes_frozen_hierarchy_to_postgres_and_qdrant(catalog_dep
         assert ready.status_code == 200
         assert ready.json() == {"status": "ready", "release": release, "product_count": 10,
                                 "embedding_model": MODEL_ID, "preprocessing": PREPROCESSING_ID}
+        operations = api.get("/api/catalog/operations")
+        assert operations.status_code == 200
+        assert operations.json()["status"] == "ready"
+        assert operations.json()["completed_items"] == 10
         result = api.get("/api/products/search", params={"q": "wireless headphones", "category": "Headphones"})
         assert result.status_code == 200
         products = result.json()["products"]
