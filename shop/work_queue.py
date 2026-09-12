@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 from shop.models import ProductAnswer
 from shop.store import connect
+from shop import inference_control
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,14 @@ def claim(worker_id: UUID, lease_seconds: float) -> Claim | None:
             INSERT INTO attempts (id, question_id, number, worker_id, lease_expires_at)
             SELECT %s, question_id, %s, %s, lease_expires_at FROM work WHERE question_id = %s
         """, (attempt_id, question["attempt_count"], worker_id, question_id))
+        lease_row = db.execute("SELECT lease_expires_at FROM work WHERE question_id = %s", (question_id,)).fetchone()
+        assert lease_row is not None
+        lease = lease_row["lease_expires_at"]
+        if not inference_control.try_acquire(db, attempt_id, lease):
+            db.execute("UPDATE questions SET status = 'waiting', attempt_count = attempt_count - 1 WHERE id = %s", (question_id,))
+            db.execute("UPDATE attempts SET outcome = 'admission_wait', finished_at = clock_timestamp() WHERE id = %s", (attempt_id,))
+            db.execute("UPDATE work SET attempt_id = NULL, lease_expires_at = NULL WHERE question_id = %s", (question_id,))
+            return None
         return Claim(question_id, attempt_id, question["text"], question["deadline"], question["attempt_count"])
 
 
@@ -76,12 +85,14 @@ def finish(claim: Claim, answer: ProductAnswer | None,
         if question["status"] != "processing" or work["lease_expires_at"] <= now or claim.deadline <= now:
             return False
         if failure == "transient_inference" and claim.number < 3:
+            inference_control.release(db, claim.attempt_id, transient_failure=True)
             available_at = min(claim.deadline, now + timedelta(seconds=uniform(.5, 1) * 2 ** (claim.number - 1)))
             db.execute("UPDATE work SET attempt_id = NULL, lease_expires_at = NULL, available_at = %s WHERE question_id = %s", (available_at, claim.question_id))
             db.execute("UPDATE questions SET status = 'waiting', last_error = %s WHERE id = %s", (failure, claim.question_id))
             db.execute("UPDATE attempts SET outcome = 'transient_failure', finished_at = %s WHERE id = %s", (now, claim.attempt_id))
             return True
         status = "completed" if answer else "failed"
+        inference_control.release(db, claim.attempt_id, transient_failure=False)
         error = "attempts_exhausted" if failure == "transient_inference" else failure
         db.execute("UPDATE questions SET status = %s, answer = %s, last_error = %s, terminal_at = clock_timestamp() WHERE id = %s", (status, Jsonb(answer.model_dump()) if answer else None, error, claim.question_id))
         db.execute("UPDATE attempts SET outcome = %s, finished_at = clock_timestamp() WHERE id = %s", (status, claim.attempt_id))
@@ -105,6 +116,7 @@ def renew(claim: Claim, lease_seconds: float) -> bool:
         if renewed is None:
             return False
         db.execute("UPDATE attempts SET lease_expires_at = %s WHERE id = %s", (renewed["lease_expires_at"], claim.attempt_id))
+        inference_control.renew(db, claim.attempt_id, renewed["lease_expires_at"])
         return True
 
 
@@ -113,6 +125,7 @@ def cancel(question_id: UUID) -> None:
     with connect() as db:
         db.execute("SELECT question_id FROM work WHERE question_id = %s FOR UPDATE", (question_id,))
         db.execute("SELECT id FROM questions WHERE id = %s FOR UPDATE", (question_id,))
+        work = db.execute("SELECT attempt_id FROM work WHERE question_id = %s", (question_id,)).fetchone()
         terminal = db.execute("""
             WITH observed AS MATERIALIZED (SELECT clock_timestamp() AS now)
             UPDATE questions SET
@@ -123,6 +136,8 @@ def cancel(question_id: UUID) -> None:
         """, (question_id,)).fetchone()
         if terminal is None:
             return
+        if work is not None and work["attempt_id"] is not None:
+            inference_control.release(db, work["attempt_id"])
         db.execute("""
             UPDATE attempts SET outcome = %s, finished_at = %s
             WHERE id = (SELECT attempt_id FROM work WHERE question_id = %s)
@@ -148,6 +163,9 @@ def expire() -> int:
                 RETURNING terminal_at
             """, (question_id,)).fetchone()
             if terminal is not None:
+                work = db.execute("SELECT attempt_id FROM work WHERE question_id = %s", (question_id,)).fetchone()
+                if work is not None and work["attempt_id"] is not None:
+                    inference_control.release(db, work["attempt_id"])
                 db.execute("""
                     UPDATE attempts SET outcome = 'expired', finished_at = %s
                     WHERE id = (SELECT attempt_id FROM work WHERE question_id = %s)

@@ -19,6 +19,10 @@ class Conflict(Exception):
     pass
 
 
+class AdmissionRejected(Exception):
+    pass
+
+
 def connect() -> psycopg.Connection[dict[str, Any]]:
     return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, connect_timeout=5)
 
@@ -55,6 +59,7 @@ def get_conversation(conversation_id: UUID, token: str) -> Conversation:
 
 def submit(conversation_id: UUID, token: str, submission: Submission) -> Question:
     with connect() as db:
+        db.execute("SELECT pg_advisory_xact_lock(741922)")
         if not db.execute("SELECT 1 FROM conversations WHERE id = %s AND session_hash = %s FOR UPDATE", (conversation_id, session_hash(token))).fetchone():
             raise NotFound
         existing = db.execute("SELECT * FROM questions WHERE conversation_id = %s AND submission_id = %s", (conversation_id, submission.submission_id)).fetchone()
@@ -64,6 +69,18 @@ def submit(conversation_id: UUID, token: str, submission: Submission) -> Questio
             return Question.model_validate(existing)
         if db.execute("SELECT 1 FROM questions WHERE conversation_id = %s AND status IN ('waiting', 'processing')", (conversation_id,)).fetchone():
             raise Conflict("A question is already pending in this conversation")
+        pending_limit = int(os.environ.get("PENDING_QUESTION_LIMIT", "100"))
+        pending_row = db.execute("SELECT count(*) AS count FROM questions WHERE status IN ('waiting', 'processing')").fetchone()
+        assert pending_row is not None
+        pending = pending_row["count"]
+        if pending >= pending_limit:
+            raise AdmissionRejected("The assistant is busy; please try again shortly")
+        rate_limit = int(os.environ.get("SESSION_QUESTION_RATE_LIMIT", "20"))
+        recent_row = db.execute("SELECT count(*) AS count FROM questions WHERE conversation_id IN (SELECT id FROM conversations WHERE session_hash = %s) AND accepted_at > clock_timestamp() - interval '1 minute'", (session_hash(token),)).fetchone()
+        assert recent_row is not None
+        recent = recent_row["count"]
+        if recent >= rate_limit:
+            raise AdmissionRejected("Question rate limit reached; please try again shortly")
         row = db.execute("""
             INSERT INTO questions (id, conversation_id, submission_id, text, status, accepted_at, deadline)
             VALUES (%s, %s, %s, %s, 'waiting', statement_timestamp(), statement_timestamp() + interval '2 minutes')
@@ -115,6 +132,17 @@ def catalog_operations() -> dict[str, object] | None:
         return dict(row)
 
 
+def inference_status() -> dict[str, object]:
+    with connect() as db:
+        row = db.execute("SELECT breaker_state, consecutive_failures, opened_at, probe_attempt_id FROM inference_control WHERE id = TRUE").fetchone()
+        depth = db.execute("SELECT count(*) AS count FROM work w JOIN questions q ON q.id = w.question_id WHERE q.status IN ('waiting', 'processing')").fetchone()
+        active = db.execute("SELECT count(*) AS count FROM inference_leases WHERE lease_expires_at > clock_timestamp()").fetchone()
+        assert row is not None and depth is not None and active is not None
+        return {"breaker_state": row["breaker_state"], "consecutive_failures": row["consecutive_failures"],
+                "opened_at": row["opened_at"], "probe_active": row["probe_attempt_id"] is not None,
+                "active_slots": active["count"], "slot_limit": 2, "pending_depth": depth["count"]}
+
+
 def products_by_ids(product_ids: list[str]) -> list[Product]:
     if not product_ids:
         return []
@@ -127,6 +155,17 @@ def products_by_ids(product_ids: list[str]) -> list[Product]:
 def product_search_release() -> str | None:
     status = catalog_status()
     return str(status["release"]) if status else None
+
+
+def is_standalone_question(question_id: UUID) -> bool:
+    """A cache candidate must be the conversation's first accepted question."""
+    with connect() as db:
+        row = db.execute("""
+            SELECT count(*) AS count FROM questions q
+            WHERE q.conversation_id = (SELECT conversation_id FROM questions WHERE id = %s)
+              AND q.accepted_at <= (SELECT accepted_at FROM questions WHERE id = %s)
+        """, (question_id, question_id)).fetchone()
+        return bool(row and row["count"] == 1)
 
 
 def get_operations(question_id: UUID) -> OperationalQuestion:

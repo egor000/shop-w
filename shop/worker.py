@@ -8,7 +8,8 @@ from uuid import UUID, uuid4
 from typing import Literal
 
 from shop.inference import DeterministicProvider, InferenceProvider, TransientInferenceError, VLLMProvider
-from shop.store import catalog_ready, get_product, product_search_release
+from shop.store import catalog_ready, get_product, is_standalone_question, product_search_release
+from shop.semantic_cache import lookup as cache_lookup, put as cache_put
 from shop.vector_store import search as vector_search
 from shop import work_queue
 
@@ -48,8 +49,12 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
                 product_id = matches[0]
             else:
                 product_id = None
-        answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
-                                 timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
+        standalone = is_standalone_question(claim.question_id)
+        answer = cache_lookup(claim.text, standalone=standalone)
+        if answer is None:
+            answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
+                                     timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
+            cache_put(claim.text, answer, standalone=standalone)
     except TransientInferenceError:
         answer = None
         failure = "transient_inference"

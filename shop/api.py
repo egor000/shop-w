@@ -60,6 +60,11 @@ async def conflict(request: Request, error: store.Conflict) -> JSONResponse:
     return JSONResponse({"detail": str(error)}, status_code=409)
 
 
+@app.exception_handler(store.AdmissionRejected)
+async def admission_rejected(request: Request, error: store.AdmissionRejected) -> JSONResponse:
+    return JSONResponse({"detail": str(error)}, status_code=429, headers={"Retry-After": "5"})
+
+
 @app.post("/api/session")
 def session(request: Request, response: Response) -> dict[str, str]:
     value = store.ensure_session(request.cookies.get(COOKIE))
@@ -158,3 +163,8 @@ def catalog_readiness() -> dict[str, object]:
 @app.get("/api/catalog/operations")
 def catalog_operations() -> dict[str, object]:
     return store.catalog_operations() or {"status": "unready", "completed_batches": 0, "completed_items": 0}
+
+
+@app.get("/api/operations/inference")
+def inference_operations() -> dict[str, object]:
+    return store.inference_status()

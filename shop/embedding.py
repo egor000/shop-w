@@ -7,6 +7,7 @@ from typing import cast
 MODEL_ID = "BAAI/bge-small-en-v1.5"
 MODEL_REVISION = "73e8f7f"
 PREPROCESSING_ID = "catalog-text-v1"
+CACHE_PREPROCESSING_ID = "cache-question-v1"
 DIMENSION = 384
 
 
@@ -20,6 +21,25 @@ def embed(text: str) -> list[float]:
     # Repeatable CPU substitute for local integration tests; identity remains explicit.
     values = [0.0] * DIMENSION
     for token in re.findall(r"[a-z0-9]+", preprocess(text)):
+        digest = hashlib.sha256(token.encode()).digest()
+        index = int.from_bytes(digest[:2], "big") % DIMENSION
+        values[index] += 1.0 if digest[2] % 2 else -1.0
+    norm = math.sqrt(sum(value * value for value in values)) or 1
+    return [value / norm for value in values]
+
+
+def embed_cache_question(text: str) -> list[float]:
+    """Embed question text with cache-specific preprocessing.
+
+    Cache questions intentionally do not use the ``passage:`` product-search
+    prefix.  Keeping this seam separate prevents a later model change from
+    silently making product and cache vectors incompatible.
+    """
+    normalized = " ".join(text.lower().split())
+    if __import__("os").environ.get("EMBEDDING_BACKEND") == "bge":
+        return BGEEmbedder().encode(normalized)
+    values = [0.0] * DIMENSION
+    for token in re.findall(r"[a-z0-9]+", normalized):
         digest = hashlib.sha256(token.encode()).digest()
         index = int.from_bytes(digest[:2], "big") % DIMENSION
         values[index] += 1.0 if digest[2] % 2 else -1.0
