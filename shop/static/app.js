@@ -4,6 +4,9 @@ const form = document.querySelector('#question-form');
 const input = document.querySelector('#question');
 const send = document.querySelector('#send');
 const retry = document.querySelector('#retry');
+const cancelQuestion = document.querySelector('#cancel-question');
+const retryQuestion = document.querySelector('#retry-question');
+let latestQuestion;
 let conversation;
 let timer;
 let busy = false;
@@ -48,6 +51,11 @@ function renderHistory(questions) {
     const text = document.createElement('p');
     text.textContent = question.text;
     article.append(heading, text);
+    const outcome = document.createElement('p');
+    outcome.className = 'muted';
+    outcome.textContent = { waiting: 'Waiting', processing: 'Preparing answer', completed: 'Answer saved',
+      failed: 'Answer failed', cancelled: 'Question cancelled', expired: 'Question expired' }[question.status];
+    article.append(outcome);
     if (question.answer) {
       const answer = document.createElement('p');
       answer.textContent = question.answer.text;
@@ -66,10 +74,16 @@ function renderHistory(questions) {
 function render(questions) {
   renderHistory(questions);
   const latest = questions.at(-1);
+  latestQuestion = latest;
   const pending = latest && ['waiting', 'processing'].includes(latest.status);
+  cancelQuestion.hidden = !pending;
+  cancelQuestion.disabled = false;
+  retryQuestion.hidden = !latest || !['failed', 'expired'].includes(latest.status);
+  retryQuestion.disabled = Boolean(localStorage.getItem(outboxKey()));
   statusView.textContent = pending ? (latest.status === 'waiting' ? 'Waiting for an answer…' : 'Preparing your answer…')
     : latest?.status === 'completed' ? 'Answer saved.'
     : latest?.status === 'expired' ? 'The question expired before an answer was ready. You can ask again.'
+    : latest?.status === 'cancelled' ? 'Question cancelled. You can ask another question.'
     : latest?.status === 'failed' ? 'The answer could not be prepared. You can ask again.' : 'Ready for your question.';
   setEnabled(!pending && !localStorage.getItem(outboxKey()));
 }
@@ -136,11 +150,12 @@ async function connect() {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (busy || !input.value.trim()) return;
+  if (busy || !input.value.trim() || localStorage.getItem(outboxKey())) return;
   busy = true;
   generation += 1;
   clearTimeout(timer);
   setEnabled(false);
+  retryQuestion.disabled = true;
   statusView.textContent = 'Sending your question…';
   try {
     // Persist both text and identity before the first network attempt.
@@ -151,4 +166,22 @@ form.addEventListener('submit', async (event) => {
   finally { busy = false; }
 });
 retry.addEventListener('click', connect);
+cancelQuestion.addEventListener('click', async () => {
+  if (busy || !latestQuestion) return;
+  busy = true;
+  generation += 1;
+  clearTimeout(timer);
+  cancelQuestion.disabled = true;
+  statusView.textContent = 'Cancelling your question…';
+  try {
+    await api(`/api/conversations/${conversation}/questions/${latestQuestion.id}/cancel`, {});
+    await refresh();
+  } catch (error) { showError(error); }
+  finally { busy = false; }
+});
+retryQuestion.addEventListener('click', () => {
+  if (busy || !latestQuestion || localStorage.getItem(outboxKey())) return;
+  input.value = latestQuestion.text;
+  form.requestSubmit(); // A deliberate retry gets a fresh, persisted submission ID.
+});
 connect();

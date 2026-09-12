@@ -56,5 +56,13 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  maintenance:
+    <<: *app
+    command: ["python", "-m", "shop.maintenance"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   postgres-data:

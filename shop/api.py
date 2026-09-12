@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from shop import store
+from shop import store, work_queue
 from shop.models import Conversation, OperationalQuestion, Question, Submission
 
 app = FastAPI(title="Shopping assistant")
@@ -85,6 +85,14 @@ def operations(question_id: UUID) -> OperationalQuestion:
 @app.post("/api/conversations/{conversation_id}/questions", status_code=202)
 def submit(conversation_id: UUID, submission: Submission, request: Request) -> Question:
     return store.submit(conversation_id, token(request), submission)
+
+
+@app.post("/api/conversations/{conversation_id}/questions/{question_id}/cancel")
+def cancel(conversation_id: UUID, question_id: UUID, request: Request) -> Question:
+    session_token = token(request)
+    store.get_question(conversation_id, question_id, session_token)
+    work_queue.cancel(question_id)
+    return store.get_question(conversation_id, question_id, session_token)
 
 
 @app.get("/products/{product_id}", response_class=HTMLResponse)

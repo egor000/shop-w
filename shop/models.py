@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-QuestionStatus = Literal["waiting", "processing", "completed", "failed", "expired"]
+QuestionStatus = Literal["waiting", "processing", "completed", "failed", "expired", "cancelled"]
 
 
 class Submission(BaseModel):
@@ -43,6 +43,7 @@ class Question(BaseModel):
     attempt_count: int
     recovery_count: int
     last_error: str | None
+    terminal_at: datetime | None
 
 
 class Attempt(BaseModel):
@@ -63,6 +64,7 @@ class OperationalQuestion(BaseModel):
     attempt_count: int
     recovery_count: int
     last_error: str | None
+    terminal_at: datetime | None
     next_attempt_at: datetime | None
     attempts: list[Attempt]
 

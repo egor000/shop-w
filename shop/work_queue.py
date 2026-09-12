@@ -42,7 +42,7 @@ def claim(worker_id: UUID, lease_seconds: float) -> Claim | None:
         if question["deadline"] <= now or question["attempt_count"] >= 3:
             status = "expired" if question["deadline"] <= now else "failed"
             error = "deadline_exceeded" if status == "expired" else "attempts_exhausted"
-            db.execute("UPDATE questions SET status = %s, last_error = %s WHERE id = %s", (status, error, question_id))
+            db.execute("UPDATE questions SET status = %s, last_error = %s, terminal_at = clock_timestamp() WHERE id = %s", (status, error, question_id))
             db.execute("DELETE FROM work WHERE question_id = %s", (question_id,))
             return None
         question = db.execute("""
@@ -83,7 +83,7 @@ def finish(claim: Claim, answer: ProductAnswer | None,
             return True
         status = "completed" if answer else "failed"
         error = "attempts_exhausted" if failure == "transient_inference" else failure
-        db.execute("UPDATE questions SET status = %s, answer = %s, last_error = %s WHERE id = %s", (status, Jsonb(answer.model_dump()) if answer else None, error, claim.question_id))
+        db.execute("UPDATE questions SET status = %s, answer = %s, last_error = %s, terminal_at = clock_timestamp() WHERE id = %s", (status, Jsonb(answer.model_dump()) if answer else None, error, claim.question_id))
         db.execute("UPDATE attempts SET outcome = %s, finished_at = clock_timestamp() WHERE id = %s", (status, claim.attempt_id))
         db.execute("DELETE FROM work WHERE question_id = %s", (claim.question_id,))
     return True
@@ -106,3 +106,51 @@ def renew(claim: Claim, lease_seconds: float) -> bool:
             return False
         db.execute("UPDATE attempts SET lease_expires_at = %s WHERE id = %s", (renewed["lease_expires_at"], claim.attempt_id))
         return True
+
+
+def cancel(question_id: UUID) -> None:
+    """Caller authorizes the immutable conversation association before entering."""
+    with connect() as db:
+        db.execute("SELECT question_id FROM work WHERE question_id = %s FOR UPDATE", (question_id,))
+        db.execute("SELECT id FROM questions WHERE id = %s FOR UPDATE", (question_id,))
+        terminal = db.execute("""
+            WITH observed AS MATERIALIZED (SELECT clock_timestamp() AS now)
+            UPDATE questions SET
+              status = CASE WHEN deadline <= observed.now THEN 'expired' ELSE 'cancelled' END,
+              last_error = CASE WHEN deadline <= observed.now THEN 'deadline_exceeded' ELSE NULL END,
+              terminal_at = observed.now
+            FROM observed WHERE id = %s AND status IN ('waiting', 'processing') RETURNING status, terminal_at
+        """, (question_id,)).fetchone()
+        if terminal is None:
+            return
+        db.execute("""
+            UPDATE attempts SET outcome = %s, finished_at = %s
+            WHERE id = (SELECT attempt_id FROM work WHERE question_id = %s)
+        """, (terminal["status"], terminal["terminal_at"], question_id))
+        db.execute("DELETE FROM work WHERE question_id = %s", (question_id,))
+
+
+def expire() -> int:
+    """Expire one bounded batch independently of inference availability."""
+    with connect() as db:
+        rows = db.execute("""
+            SELECT w.question_id FROM work w JOIN questions q ON q.id = w.question_id
+            WHERE q.deadline <= clock_timestamp() AND q.status IN ('waiting', 'processing')
+            ORDER BY q.deadline FOR UPDATE OF w SKIP LOCKED LIMIT 100
+        """).fetchall()
+        for row in rows:
+            question_id = row["question_id"]
+            db.execute("SELECT id FROM questions WHERE id = %s FOR UPDATE", (question_id,))
+            terminal = db.execute("""
+                UPDATE questions SET status = 'expired', last_error = 'deadline_exceeded',
+                  terminal_at = clock_timestamp()
+                WHERE id = %s AND status IN ('waiting', 'processing') AND deadline <= clock_timestamp()
+                RETURNING terminal_at
+            """, (question_id,)).fetchone()
+            if terminal is not None:
+                db.execute("""
+                    UPDATE attempts SET outcome = 'expired', finished_at = %s
+                    WHERE id = (SELECT attempt_id FROM work WHERE question_id = %s)
+                """, (terminal["terminal_at"], question_id))
+                db.execute("DELETE FROM work WHERE question_id = %s", (question_id,))
+        return len(rows)

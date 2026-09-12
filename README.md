@@ -1,6 +1,6 @@
 # Shopping assistant
 
-The first two implementation slices ([#1](https://github.com/egor000/shop-w/issues/1), [#2](https://github.com/egor000/shop-w/issues/2)) let an anonymous shopper ask about one fictional product and recover its saved answer across application crashes. Python/FastAPI serves the browser and public API; separate Python workers process PostgreSQL work records. The deterministic provider requires no GPU or model downloads.
+The first three implementation slices ([#1](https://github.com/egor000/shop-w/issues/1), [#2](https://github.com/egor000/shop-w/issues/2), [#3](https://github.com/egor000/shop-w/issues/3)) let an anonymous shopper ask about one fictional product, recover its saved answer across application crashes, cancel pending questions, and retry failed or expired questions. Python/FastAPI serves the browser and public API; separate Python workers process PostgreSQL work records. The deterministic provider requires no GPU or model downloads.
 
 ## Run locally
 
@@ -23,6 +23,7 @@ Ordinary `down` preserves stored conversations. `down -v` deletes them. The migr
 - `POST /api/conversations`: create a conversation belonging to that session.
 - `POST /api/conversations/{id}/questions`: accept `{ "submission_id": "UUID", "text": "question" }` and return `202` only after both the question and work record commit. The browser generates and saves the UUID before sending.
 - `GET /api/conversations/{id}`: recover all accepted questions, original acceptance/deadline timestamps, statuses and complete answers. Returns `404` for another session's conversation.
+- `POST /api/conversations/{id}/questions/{question_id}/cancel`: cancel pending work. Repeated cancellation returns the saved terminal outcome. If the deadline has elapsed, expiry wins; completed results remain unchanged.
 - `GET /products/trail-cup`: product facts and local product page.
 - `GET /api/operations/questions/{id}`: read-only attempt/lease/recovery metadata, without question or answer text. This v1 operational endpoint has no administrator authentication.
 - `GET /health`: database reachability; `/docs`: generated API documentation.
@@ -32,6 +33,8 @@ Identical retries return the original question, including its current state. Cha
 Each acceptance transaction locks its conversation. Worker claims use PostgreSQL `FOR UPDATE SKIP LOCKED`, a process identity, and distinct attempt identifiers. Renewable leases default to ten seconds (`WORKER_LEASE_SECONDS`), with a heartbeat every third of a lease. Inference runs outside database transactions. Abandoned work becomes claimable after lease expiry. Completion checks the current attempt, a still-valid lease, terminal state, and the original deadline while holding the work row lock, then commits the authoritative answer and removes work together. Late results cannot replace it.
 
 All claims, including recovery after process death, consume the persisted maximum of three attempts. `TransientInferenceError` schedules a persisted retry with exponential jitter (0.5–1 seconds after the first failure, 1–2 seconds after the second), bounded by the original deadline. Other provider errors fail the question immediately. The provider receives the remaining inference timeout. Attempt history, sanitized failure codes and recovery counts survive restarts; logs contain identifiers and statuses without shopper questions or answers. Stop old API/worker processes before applying schema upgrades; Compose recreates them and runs migrations before starting the new versions.
+
+The independent `maintenance` service expires due questions even with every inference worker stopped. Run `python -m shop.maintenance --once` for a scheduled-job invocation; without `--once` it checks once per second. Expiry, cancellation and completion serialize through durable work ownership and preserve the first valid terminal result. Terminal timestamps are available in shopper and operational state. A browser disconnect does not cancel work. “Try this question again” creates a fresh submission ID and deadline for failed/expired questions; network retry keeps the original ID. Cancelled and expired records remain readable until a future retention job removes them.
 
 ## Verify
 
@@ -52,6 +55,6 @@ The browser checklist and recorded results are in [docs/browser-check.md](docs/b
 
 ## Remaining tickets
 
-Workers enforce the original deadline on claims, renewals and completion, and materialize expired work when they encounter it. If all workers are unavailable, expiry is not yet materialized. Independent expiry maintenance, cancellation, and explicit shopper retry belong to [#3](https://github.com/egor000/shop-w/issues/3).
+Worker recovery, independent expiry maintenance, cancellation, and explicit shopper retry are implemented. A stopped or non-cooperative provider may still finish its internal call after cancellation or expiry, but it cannot replace the saved terminal outcome.
 
 Qdrant ingestion, real local vLLM, semantic caching, overload protection, observability dashboards and Kubernetes are later [implementation tickets](https://github.com/egor000/shop-w/issues). The accepted design is in [.scratch/shop-assistant/spec.md](.scratch/shop-assistant/spec.md). Live catalog updates, database failover, shopper accounts and administrator permissions are outside v1.

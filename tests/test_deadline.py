@@ -15,7 +15,7 @@ def test_late_inference_cannot_publish_after_original_deadline(deployment):
             "submission_id": str(uuid4()), "text": "Question that stays queued beyond its deadline",
         })
         # Deliberately non-cooperative inference returns a success after the deadline.
-        with deployment.controlled_worker(TEST_INFERENCE_DELAY="121", TEST_INFERENCE_RESULT="Too late", WORKER_LEASE_SECONDS="2"):
+        with deployment.maintenance(), deployment.controlled_worker(TEST_INFERENCE_DELAY="121", TEST_INFERENCE_RESULT="Too late", WORKER_LEASE_SECONDS="2"):
             until = time.monotonic() + 135
             while time.monotonic() < until:
                 question = client.get(f"/api/conversations/{conversation}").json()["questions"][-1]
@@ -27,6 +27,8 @@ def test_late_inference_cannot_publish_after_original_deadline(deployment):
                 time.sleep(.5)
             else:
                 raise AssertionError("Deadline was not materialized after inference returned")
+            time.sleep(2)  # Let the non-cooperative provider return after maintenance won expiry.
+            assert client.get(f"/api/conversations/{conversation}").json()["questions"][-1] == question
         assert question["deadline"] == accepted["deadline"]
         assert question["attempt_count"] == 1
         assert question["answer"] is None

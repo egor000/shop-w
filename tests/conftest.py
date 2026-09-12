@@ -78,6 +78,9 @@ class Deployment:
     def controlled_worker(self, **settings):
         return process("-m", "tests.controlled_worker", env={**self.env, **settings})
 
+    def maintenance(self):
+        return process("-m", "shop.maintenance", env=self.env)
+
 
 @pytest.fixture
 def deployment():

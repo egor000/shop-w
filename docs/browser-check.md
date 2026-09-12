@@ -35,3 +35,16 @@ Verified in Chrome on 2026-09-12 with the upgraded Compose deployment and existi
 The API suite separately verifies expired ownership before reassignment, rejection of a stale answer after a replacement completes, persisted three-attempt budgets across crashes, and the actual two-minute deadline. No database state is edited to force those outcomes.
 
 Ticket #2 validation: 22 tests passed in the complete suite, strict mypy passed for eight application modules, and both review axes have no outstanding findings. Each test uses its own PostgreSQL schema so deliberately unfinished work cannot leak into another scenario.
+
+## Cancellation, expiry and explicit retry — ticket #3
+
+The browser now displays each question's persisted outcome, offers “Cancel question” while pending, and offers “Try this question again” after failure or expiry.
+
+1. Stop inference workers but leave maintenance running. Submit a question, click “Cancel question”, and reload. Verify the saved cancelled outcome and the ability to ask another question.
+2. Submit another question and leave workers stopped for its real two-minute lifetime. Verify the expiry outcome arrives through polling and remains readable after reconnect.
+3. Run `python tests/disrupted_proxy.py`. Open that same conversation URL with port `8092`, then use “Try this question again”. The first retry is accepted but its acknowledgement is withheld. Verify that explicit retry is disabled while “Reconnect and retry” remains available; this prevents a second UUID from overwriting unresolved delivery.
+4. Start an inference worker, use “Reconnect and retry”, and verify exactly one additional question with a saved answer. The original expired question must remain unchanged.
+
+Cancellation followed by reload was verified in Chrome. The review caught the unresolved-delivery edge case above; both submission handlers now guard the existing outbox, and explicit retry disables immediately on submission.
+
+The full browser check passed: maintenance expired the question with inference stopped; the fault proxy withheld the explicit retry's acknowledgement; “Try this question again” was disabled while “Reconnect and retry” stayed visible. Reconnect recovered exactly one additional completed question, beside the unchanged expired original. Ticket #3 validation finished with 27 passing tests, strict mypy passing for nine application modules, and zero outstanding findings on either review axis.

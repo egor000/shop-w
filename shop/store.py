@@ -88,7 +88,7 @@ def get_operations(question_id: UUID) -> OperationalQuestion:
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         row = db.execute("""
             SELECT q.id, q.status, q.accepted_at, q.deadline, q.attempt_count,
-                   q.recovery_count, q.last_error,
+                   q.recovery_count, q.last_error, q.terminal_at,
                    CASE WHEN w.attempt_id IS NULL THEN w.available_at END AS next_attempt_at
             FROM questions q LEFT JOIN work w ON w.question_id = q.id WHERE q.id = %s
         """, (question_id,)).fetchone()
@@ -99,3 +99,14 @@ def get_operations(question_id: UUID) -> OperationalQuestion:
             FROM attempts WHERE question_id = %s ORDER BY number
         """, (question_id,)).fetchall()
         return OperationalQuestion.model_validate(row)
+
+
+def get_question(conversation_id: UUID, question_id: UUID, token: str) -> Question:
+    with connect() as db:
+        row = db.execute("""
+            SELECT q.* FROM questions q JOIN conversations c ON c.id = q.conversation_id
+            WHERE q.id = %s AND c.id = %s AND c.session_hash = %s
+        """, (question_id, conversation_id, session_hash(token))).fetchone()
+        if row is None:
+            raise NotFound
+        return Question.model_validate(row)
