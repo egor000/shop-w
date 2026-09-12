@@ -59,6 +59,9 @@ class VLLMProvider:
             with request.urlopen(req, timeout=min(timeout_seconds, 30)) as response:
                 body: Any = json.loads(response.read())
             content = body["choices"][0]["message"]["content"]
+            if "```" in content:
+                content = content.split("```", 2)[1]
+                content = content.removeprefix("json").strip()
             parsed: Any = json.loads(content)
             return ProductAnswer.model_validate(parsed)
         except TimeoutError as error:
