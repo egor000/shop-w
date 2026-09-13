@@ -57,8 +57,12 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
         if answer is None:
             with span("llm.chat", provider=provider.__class__.__name__, model=os.environ.get("VLLM_MODEL", "Qwen/Qwen3-1.7B"),
                       question_id=str(claim.question_id), attempt_id=str(claim.attempt_id)):
-                answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
-                                         timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
+                remaining = max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds())
+                if isinstance(provider, VLLMProvider):
+                    answer = provider.answer_question(claim.question_id, claim.text, timeout_seconds=remaining)
+                else:
+                    answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
+                                             timeout_seconds=remaining)
             cache_put(claim.text, answer, standalone=standalone)
     except TransientInferenceError:
         answer = None

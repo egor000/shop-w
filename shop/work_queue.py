@@ -95,6 +95,8 @@ def finish(claim: Claim, answer: ProductAnswer | None,
         inference_control.release(db, claim.attempt_id, transient_failure=False)
         error = "attempts_exhausted" if failure == "transient_inference" else failure
         db.execute("UPDATE questions SET status = %s, answer = %s, last_error = %s, terminal_at = clock_timestamp() WHERE id = %s", (status, Jsonb(answer.model_dump()) if answer else None, error, claim.question_id))
+        if answer is not None:
+            db.execute("UPDATE questions SET context_state = %s WHERE id = %s", (Jsonb(answer.context_state), claim.question_id))
         db.execute("UPDATE attempts SET outcome = %s, finished_at = clock_timestamp() WHERE id = %s", (status, claim.attempt_id))
         db.execute("DELETE FROM work WHERE question_id = %s", (claim.question_id,))
     return True

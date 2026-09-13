@@ -2,6 +2,7 @@ import json
 import os
 import time
 from typing import Any, Protocol
+from uuid import UUID
 from urllib import request
 
 from shop.models import Product, ProductAnswer, ProductLink
@@ -41,6 +42,22 @@ class VLLMProvider:
     def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
         self.base_url = (base_url or os.environ.get("VLLM_URL", "http://127.0.0.1:8000")).rstrip("/")
         self.model = model or os.environ.get("VLLM_MODEL", "Qwen/Qwen3-1.7B")
+
+    def exchange(self, path: str, payload: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
+        if timeout_seconds <= 0:
+            raise TransientInferenceError("Inference deadline reached")
+        try:
+            req = request.Request(self.base_url + path, data=json.dumps(payload).encode(),
+                                  headers={"Content-Type": "application/json"}, method="POST")
+            with request.urlopen(req, timeout=min(timeout_seconds, 30)) as response:
+                body: dict[str, Any] = json.loads(response.read())
+                return body
+        except Exception as error:
+            raise TransientInferenceError("vLLM unavailable or invalid response") from error
+
+    def answer_question(self, question_id: UUID, question: str, *, timeout_seconds: float) -> ProductAnswer:
+        from shop.conversation import answer_question
+        return answer_question(self, question_id, question, timeout_seconds=timeout_seconds)
 
     def answer(self, question: str, product: Product | None, *, timeout_seconds: float) -> ProductAnswer:
         if timeout_seconds <= 0:

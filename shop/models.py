@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -30,6 +31,7 @@ class ProductLink(BaseModel):
 class ProductAnswer(BaseModel):
     text: str
     products: list[ProductLink]
+    context_state: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
 
 class Question(BaseModel):
@@ -92,3 +94,6 @@ class Product(BaseModel):
     attributes: dict[str, str | int | float | bool] = Field(default_factory=dict)
     department_id: str = ""
     category_id: str = ""
+    currency: str = "USD"
+    measurement_configuration: str = "assembled product"
+    image_url: str = "/static/product-placeholder.svg"

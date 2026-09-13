@@ -104,6 +104,7 @@ def lookup(question: str, *, standalone: bool) -> ProductAnswer | None:
             continue
         try:
             answer = ProductAnswer.model_validate(payload["answer"])
+            answer.context_state = dict(payload.get("context_state") or {})
             ids = [link.url.rsplit("/", 1)[-1] for link in answer.products]
             products = products_by_ids(ids)
             if len(products) != len(ids) or any(product.stock < 0 for product in products):
@@ -133,7 +134,8 @@ def put(question: str, answer: ProductAnswer, *, standalone: bool) -> None:
                    "embedding_revision": MODEL_REVISION, "preprocessing": CACHE_PREPROCESSING_ID,
                    "chat_model": CHAT_MODEL_ID, "prompt": PROMPT_ID, "tool_schema": TOOL_SCHEMA_ID,
                    "constraints": _constraints(question), "created_at": now,
-                   "answer": answer.model_dump()}
+                   "answer": answer.model_dump(),
+                   "context_state": answer.context_state}
         qdrant.upsert(COLLECTION, points=[models.PointStruct(
             id=str(uuid5(NAMESPACE_URL, key)), vector=embed_cache_question(question), payload=payload)])
         cap = int(os.environ.get("CACHE_MAX_ENTRIES", DEFAULT_MAX_ENTRIES))

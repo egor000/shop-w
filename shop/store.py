@@ -9,6 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from shop.models import Conversation, OperationalQuestion, Product, Question, Submission
+from shop.question_context import classify_question
 
 
 class NotFound(Exception):
@@ -187,6 +188,35 @@ def products_by_ids(product_ids: list[str]) -> list[Product]:
         return [by_id[product_id] for product_id in product_ids if product_id in by_id]
 
 
+def resolve_products(reference: str) -> list[Product]:
+    """Resolve a catalog identity without guessing between overlapping names."""
+    with connect() as db:
+        rows = db.execute("""SELECT facts FROM products
+            WHERE lower(id) = lower(%s) OR lower(facts->>'name') = lower(%s)
+            ORDER BY id LIMIT 8""", (reference, reference)).fetchall()
+        if not rows:
+            escaped = reference.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            rows = db.execute("""SELECT facts FROM products
+                WHERE facts->>'name' ILIKE %s ORDER BY id LIMIT 8""", ("%" + escaped + "%",)).fetchall()
+        return [Product.model_validate(row["facts"]) for row in rows]
+
+
+def conversation_context(question_id: UUID) -> tuple[list[Question], dict[str, Any]]:
+    """Only this shopper conversation's earlier completed turns supply context."""
+    with connect() as db:
+        rows = db.execute("""SELECT previous.* FROM questions previous JOIN questions current
+            ON previous.conversation_id = current.conversation_id
+            WHERE current.id = %s AND previous.accepted_at < current.accepted_at
+              AND previous.status = 'completed' ORDER BY previous.accepted_at, previous.id""", (question_id,)).fetchall()
+    state = dict(rows[-1]["context_state"]) if rows else {}
+    interactions = [interaction for row in rows for interaction in (row.get("context_state") or {}).get("tool_interactions", [])]
+    if interactions:
+        state["tool_interactions"] = interactions[-12:]
+    if rows and not state.get("product_ids"):
+        state["product_ids"] = [link["url"].rsplit("/", 1)[-1] for link in (rows[-1].get("answer") or {}).get("products", [])]
+    return [Question.model_validate(row) for row in rows], state
+
+
 def product_search_release() -> str | None:
     status = catalog_status()
     return str(status["release"]) if status else None
@@ -200,7 +230,8 @@ def is_standalone_question(question_id: UUID) -> bool:
             WHERE q.conversation_id = (SELECT conversation_id FROM questions WHERE id = %s)
               AND q.accepted_at <= (SELECT accepted_at FROM questions WHERE id = %s)
         """, (question_id, question_id)).fetchone()
-        return bool(row and row["count"] == 1)
+        question = db.execute("SELECT text FROM questions WHERE id = %s", (question_id,)).fetchone()
+        return bool(row and question and classify_question(question["text"], has_prior_questions=row["count"] != 1) == "standalone")
 
 
 def get_operations(question_id: UUID) -> OperationalQuestion:

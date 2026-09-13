@@ -13,13 +13,16 @@ class CatalogProduct:
     category: str
     price_cents: int
     stock: int
-    rating_average: float
+    rating_average: float | None
     rating_count: int
     length_cm: float
     width_cm: float
     height_cm: float
     weight_kg: float
     attributes: dict[str, str | int | float | bool]
+    currency: str = "USD"
+    measurement_configuration: str = "assembled product"
+    image_url: str = "/static/product-placeholder.svg"
 
     @property
     def department_id(self) -> str:
@@ -33,6 +36,8 @@ class CatalogProduct:
         facts = asdict(self)
         facts["department_id"] = self.department_id
         facts["category_id"] = self.category_id
+        facts["url"] = f"/products/{self.id}"
+        facts["available"] = self.stock > 0
         return facts
 
     def text(self) -> str:

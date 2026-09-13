@@ -136,14 +136,17 @@ def cancel(conversation_id: UUID, question_id: UUID, request: Request) -> Questi
 @app.get("/products/{product_id}", response_class=HTMLResponse)
 def product(product_id: str) -> str:
     facts = store.get_product(product_id)
+    rating = "Unrated" if facts.rating_average is None else f"{facts.rating_average}/5 ({facts.rating_count} ratings)"
     return ("<!doctype html><html lang='en'><meta charset='utf-8'><title>" + html.escape(facts.name) + "</title>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'><main>"
             f"<h1>{html.escape(facts.name)}</h1><p>Brand: {html.escape(facts.brand)}</p><p>{html.escape(facts.description)}</p>"
             f"<p>{html.escape(facts.department)} / {html.escape(facts.category)}</p>"
             f"<p>USD {facts.price_cents / 100:.2f} · {facts.stock} in stock</p>"
-            f"<p>Rating: {facts.rating_average}/5 ({facts.rating_count} ratings)</p>"
+            f"<p>Rating: {rating}</p>"
             f"<p>Dimensions: {facts.length_cm:g} × {facts.width_cm:g} × {facts.height_cm:g} cm</p>"
             f"<p>Product weight: {facts.weight_kg:g} kg (excluding packaging)</p>"
+            f"<p>Measurement configuration: {html.escape(facts.measurement_configuration)}</p>"
+            f"<img src='/static/product-placeholder.svg' alt='Product illustration placeholder' width='160' height='120'>"
             "<a href='/'>Back to assistant</a></main></html>")
 
 
