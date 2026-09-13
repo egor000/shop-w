@@ -45,7 +45,8 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
         )
         if catalog_ready():
             release = product_search_release()
-            with span("vector.search", release=release or "", limit="1"):
+            with span("vector.search", release=release or "", limit="1",
+                      question_id=str(claim.question_id), attempt_id=str(claim.attempt_id)):
                 matches = vector_search(claim.text, release, limit=1) if release else []
             if matches:
                 product_id = matches[0]
@@ -54,7 +55,8 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
         standalone = is_standalone_question(claim.question_id)
         answer = cache_lookup(claim.text, standalone=standalone)
         if answer is None:
-            with span("llm.chat", provider=provider.__class__.__name__, model=os.environ.get("VLLM_MODEL", "Qwen/Qwen3-1.7B")):
+            with span("llm.chat", provider=provider.__class__.__name__, model=os.environ.get("VLLM_MODEL", "Qwen/Qwen3-1.7B"),
+                      question_id=str(claim.question_id), attempt_id=str(claim.attempt_id)):
                 answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
                                          timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
             cache_put(claim.text, answer, standalone=standalone)

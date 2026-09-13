@@ -12,10 +12,18 @@ def span(name: str, **attributes: str) -> Iterator[Any]:
     try:
         from opentelemetry import trace  # type: ignore[import-not-found]
         tracer = trace.get_tracer("shop-assistant")
-        with tracer.start_as_current_span(name, attributes=attributes):
-            yield None
-    except ImportError:
+        context = tracer.start_as_current_span(name, attributes=attributes)
+        context.__enter__()
+    except Exception:
         yield None
+        return
+    try:
+        yield None
+    finally:
+        try:
+            context.__exit__(None, None, None)
+        except Exception:
+            pass
 
 
 def configure() -> None:
@@ -31,6 +39,6 @@ def configure() -> None:
         provider = TracerProvider(resource=Resource.create({"service.name": "shop-assistant"}))
         provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
         trace.set_tracer_provider(provider)
-    except ImportError:
+    except Exception:
         # The application remains fully functional when an exporter is absent.
         return
