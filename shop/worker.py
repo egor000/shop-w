@@ -10,6 +10,7 @@ from typing import Literal
 from shop.inference import DeterministicProvider, InferenceProvider, TransientInferenceError, VLLMProvider
 from shop.store import catalog_ready, get_product, is_standalone_question, product_search_release
 from shop.semantic_cache import lookup as cache_lookup, put as cache_put
+from shop.tracing import configure, span
 from shop.vector_store import search as vector_search
 from shop import work_queue
 
@@ -44,7 +45,8 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
         )
         if catalog_ready():
             release = product_search_release()
-            matches = vector_search(claim.text, release, limit=1) if release else []
+            with span("vector.search", release=release or "", limit="1"):
+                matches = vector_search(claim.text, release, limit=1) if release else []
             if matches:
                 product_id = matches[0]
             else:
@@ -52,8 +54,9 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
         standalone = is_standalone_question(claim.question_id)
         answer = cache_lookup(claim.text, standalone=standalone)
         if answer is None:
-            answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
-                                     timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
+            with span("llm.chat", provider=provider.__class__.__name__, model=os.environ.get("VLLM_MODEL", "Qwen/Qwen3-1.7B")):
+                answer = provider.answer(claim.text, get_product(product_id) if product_id else None,
+                                         timeout_seconds=max(0, (claim.deadline - datetime.now(timezone.utc)).total_seconds()))
             cache_put(claim.text, answer, standalone=standalone)
     except TransientInferenceError:
         answer = None
@@ -72,6 +75,7 @@ def process_one(provider: InferenceProvider, worker_id: UUID, lease_seconds: flo
 
 def main(provider: InferenceProvider | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    configure()
     if provider is None:
         if os.environ.get("INFERENCE_BACKEND") == "vllm":
             provider = VLLMProvider()
